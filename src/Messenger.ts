@@ -1,19 +1,34 @@
 import {
-  Field,
   Bool,
+  Field,
+  DeployArgs,
   SmartContract,
   state,
   State,
   method,
+  Permissions,
   Provable,
+  PublicKey,
 } from 'o1js';
 
 export class Messenger extends SmartContract {
   @state(Field) addressCount = State<Field>();
+  @state(PublicKey) storageServerPublicKey = State<PublicKey>();
+  @state(Field) storageNumber = State<Field>();
+  @state(Field) storageTreeRoot = State<Field>();
+
+  deploy() {
+    super.deploy();
+    this.account.permissions.set({
+      ...Permissions.default(),
+      editState: Permissions.proofOrSignature(),
+    });
+  }
 
   // TODO setup configs
-  init() {
+  @method initState(storageServerPublicKey: PublicKey) {
     super.init();
+    this.storageServerPublicKey.set(storageServerPublicKey);
     this.addressCount.set(Field(0));
   }
 

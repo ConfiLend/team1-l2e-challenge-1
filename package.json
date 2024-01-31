@@ -37,5 +37,9 @@
   },
   "peerDependencies": {
     "o1js": "0.15.*"
+  },
+  "dependencies": {
+    "experimental-zkapp-offchain-storage": "^0.2.0",
+    "xmlhttprequest-ts": "^1.0.1"
   }
 }

@@ -1,4 +1,4 @@
-import { Messenger } from './Messenger';
+import { Messenger, Message } from './Messenger';
 import {
   Field,
   Mina,
@@ -6,9 +6,7 @@ import {
   PublicKey,
   AccountUpdate,
   MerkleMap,
-  Struct,
   Bool,
-  Poseidon,
 } from 'o1js';
 
 let proofsEnabled = false;
@@ -113,15 +111,3 @@ describe('Messenger', () => {
     await txn.sign([senderKey]).send();
   });
 });
-
-class Message extends Struct({
-  publicKey: PublicKey,
-  message: Field,
-}) {
-  hashPubKey(): Field {
-    this.publicKey.isEmpty().assertFalse("The Pair is empty we can't hash it");
-    const fields = this.publicKey.toFields();
-    const hash = Poseidon.hash(fields);
-    return hash;
-  }
-}

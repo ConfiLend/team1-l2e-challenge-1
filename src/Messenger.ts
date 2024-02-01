@@ -1,19 +1,16 @@
 import {
   Bool,
-  DeployArgs,
   Field,
   MerkleMap,
   SmartContract,
   state,
   State,
-  Struct,
   method,
   MerkleMapWitness,
   Permissions,
   Provable,
   PublicKey,
   Poseidon,
-  PrivateKey,
 } from 'o1js';
 
 export class Messenger extends SmartContract {
@@ -78,11 +75,19 @@ export class Messenger extends SmartContract {
 }
 
 // class which allows us to abstract the msg checks
-class Message {
+export class Message {
+  private publicKey: PublicKey;
   private msg: Field;
 
   constructor(fieldValue: Field) {
     this.msg = fieldValue;
+  }
+
+  hashPubKey(): Field {
+    this.publicKey.isEmpty().assertFalse("The Pair is empty we can't hash it");
+    const fields = this.publicKey.toFields();
+    const hash = Poseidon.hash(fields);
+    return hash;
   }
 
   assertRules() {

@@ -1,22 +1,28 @@
 import {
   Bool,
-  Field,
   DeployArgs,
+  Field,
+  MerkleMap,
   SmartContract,
   state,
   State,
+  Struct,
   method,
+  MerkleMapWitness,
   Permissions,
   Provable,
   PublicKey,
+  Poseidon,
+  PrivateKey,
 } from 'o1js';
 
 export class Messenger extends SmartContract {
   @state(Field) addressCount = State<Field>();
-  @state(PublicKey) storageServerPublicKey = State<PublicKey>();
-  @state(Field) storageNumber = State<Field>();
-  @state(Field) storageTreeRoot = State<Field>();
+  @state(Field) addressesHashMapRoot = State<Field>();
+  @state(Field) messagesHashMapRoot = State<Field>();
+  @state(Field) nullifiersHashMapRoot = State<Field>();
 
+  // TODO setup configs
   deploy() {
     super.deploy();
     this.account.permissions.set({
@@ -25,14 +31,18 @@ export class Messenger extends SmartContract {
     });
   }
 
-  // TODO setup configs
-  @method initState(storageServerPublicKey: PublicKey) {
+  @method initState(
+    addressesHashMapRoot: Field,
+    messagesHashMapRoot: Field,
+    nullifiersHashMapRoot: Field
+  ) {
     super.init();
-    this.storageServerPublicKey.set(storageServerPublicKey);
     this.addressCount.set(Field(0));
+    this.addressesHashMapRoot.set(addressesHashMapRoot);
+    this.messagesHashMapRoot.set(messagesHashMapRoot);
+    this.nullifiersHashMapRoot.set(nullifiersHashMapRoot);
   }
 
-  // maybe @method
   incrementAddressCount() {
     const currentCount = this.addressCount.getAndRequireEquals();
     // Provable.log('Current Count is', currentCount);
@@ -51,8 +61,27 @@ export class Messenger extends SmartContract {
   }
 
   // we need to make sure that this is done only by the admin
-  @method addAddress() {
-    this.incrementAddressCount();
+  @method addAddress(keyWitness: MerkleMapWitness) {
+    //check read op
+    const initialRoot = this.addressesHashMapRoot.get();
+    this.addressesHashMapRoot.requireEquals(initialRoot);
+
+    // check the initial state matches what we expect
+    const [rootBefore, key] = keyWitness.computeRootAndKey(Field.empty());
+    rootBefore.assertEquals(initialRoot);
+
+    Provable.log('rootBefore: ', rootBefore, '\nKey to change: ', key);
+
+    // if everythign is alright make sure that we are not >100 ppl
+    this.incrementAddressCount(); // we should assert this
+
+    // compute the root after new value
+    const [rootAfter, _] = keyWitness.computeRootAndKey(Bool(true).toField());
+
+    Provable.log('rootAfter: ', rootAfter);
+
+    // set the new root
+    this.addressesHashMapRoot.set(rootAfter);
   }
 }
 

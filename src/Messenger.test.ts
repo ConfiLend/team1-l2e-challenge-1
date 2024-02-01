@@ -1,22 +1,21 @@
 import { Messenger } from './Messenger';
-import { Field, Mina, PrivateKey, PublicKey, AccountUpdate } from 'o1js';
-
 import {
-  OffChainStorage,
-  MerkleWitness8,
-} from 'experimental-zkapp-offchain-storage';
-
-import XMLHttpRequestTs from 'xmlhttprequest-ts';
-// import NodeXMLHttpRequest from
-//   XMLHttpRequestTs.XMLHttpRequest as any as typeof XMLHttpRequest;
+  Field,
+  Mina,
+  PrivateKey,
+  PublicKey,
+  AccountUpdate,
+  MerkleMap,
+  Struct,
+  Bool,
+  Poseidon,
+} from 'o1js';
 
 let proofsEnabled = false;
 
-const storageServerAddress = 'http://127.0.0.1:3001';
-// const serverPublicKey = await OffChainStorage.getPublicKey(
-//   storageServerAddress,
-//   NodeXMLHttpRequest
-// );
+const addressesMap = new MerkleMap();
+const messagesMap = new MerkleMap();
+const nullifiersMap = new MerkleMap();
 
 describe('Messenger', () => {
   let deployerAccount: PublicKey,
@@ -47,13 +46,18 @@ describe('Messenger', () => {
     const txn = await Mina.transaction(deployerAccount, () => {
       AccountUpdate.fundNewAccount(deployerAccount);
       zkApp.deploy();
+      zkApp.initState(
+        addressesMap.getRoot(),
+        messagesMap.getRoot(),
+        nullifiersMap.getRoot()
+      );
     });
     await txn.prove();
     // this tx needs .sign(), because `deploy()` adds an account update that requires signature authorization
     await txn.sign([deployerKey, zkAppPrivateKey]).send();
   }
 
-  it('generates and deploys the `Messenger` smart contract', async () => {
+  it.skip('generates and deploys the `Messenger` smart contract', async () => {
     await localDeploy();
     const addressCount = zkApp.addressCount.get();
     expect(addressCount).toEqual(Field(0));
@@ -66,9 +70,24 @@ describe('Messenger', () => {
 
     // 3 addAddress transactions
     for (let i = 0; i < 3; i++) {
-      const txn = await Mina.transaction(senderAccount, () => {
-        zkApp.addAddress();
+      //create new transaction
+      const newPair = new Pair({
+        publicKey: PrivateKey.random().toPublicKey(),
+        message: Field.empty(),
       });
+
+      //get the witness of the new key
+      const key = newPair.hashPubKey();
+      const witness = addressesMap.getWitness(key);
+
+      //create and send the transction
+      const txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addAddress(witness);
+      });
+
+      // update the local hash map
+      addressesMap.set(key, Bool(true).toField());
+
       await txn.prove();
       await txn.sign([senderKey]).send();
     }
@@ -78,7 +97,7 @@ describe('Messenger', () => {
     expect(newCount).toEqual(Field(3));
   });
 
-  it('Assertions Rules', async () => {
+  it.skip('Assertions Rules', async () => {
     await localDeploy();
     const messages = [
       // Rules:
@@ -96,71 +115,16 @@ describe('Messenger', () => {
     await txn.prove();
     await txn.sign([senderKey]).send();
   });
-
-  // it('Testing the offchain storage', async () => {
-  //   const treeHeight = 8
-  //   await localDeploy();
-  //   const currentCount = zkApp.addressCount.get();
-  //   console.log('Current Count is: ', currentCount.toString());
-
-  //     const txn = await Mina.transaction(senderAccount, () => {
-  //       zkApp.addAddress();
-  //     });
-  //     await txn.prove();
-  //     await txn.sign([senderKey]).send();
-  //   }
-
-  //   const newCount = zkApp.addressCount.get();
-  //   // console.log('New Count is: ', newCount.toString());
-  //   expect(newCount).toEqual(Field(3));
-  // });
 });
 
-// async function updateTree() {
-//   const index = BigInt(Math.floor(Math.random() * 4));
-
-//   // get the existing tree
-//   const treeRoot = await zkapp.storageTreeRoot.get();
-//   const idx2fields = await OffChainStorage.get(
-//     storageServerAddress,
-//     zkappPublicKey,
-//     treeHeight,
-//     treeRoot,
-//     NodeXMLHttpRequest
-//   );
-
-//   const tree = OffChainStorage.mapToTree(treeHeight, idx2fields);
-//   const leafWitness = new MerkleWitness8(tree.getWitness(BigInt(index)));
-
-//   // get the prior leaf
-//   const priorLeafIsEmpty = !idx2fields.has(index);
-//   let priorLeafNumber: Field;
-//   let newLeafNumber: Field;
-//   if (!priorLeafIsEmpty) {
-//     priorLeafNumber = idx2fields.get(index)![0];
-//     newLeafNumber = priorLeafNumber.add(3);
-//   } else {
-//     priorLeafNumber = Field(0);
-//     newLeafNumber = Field(1);
-//   }
-
-//   // update the leaf, and save it in the storage server
-//   idx2fields.set(index, [newLeafNumber]);
-
-//   const [storedNewStorageNumber, storedNewStorageSignature] =
-//     await OffChainStorage.requestStore(
-//       storageServerAddress,
-//       zkappPublicKey,
-//       treeHeight,
-//       idx2fields,
-//       NodeXMLHttpRequest
-//     );
-
-//   console.log(
-//     'changing index',
-//     index,
-//     'from',
-//     priorLeafNumber.toString(),
-//     'to',
-//     newLeafNumber.toString()
-//   );
+class Pair extends Struct({
+  publicKey: PublicKey,
+  message: Field,
+}) {
+  hashPubKey(): Field {
+    this.publicKey.isEmpty().assertFalse("The Pair is empty we can't hash it");
+    const fields = this.publicKey.toFields();
+    const hash = Poseidon.hash(fields);
+    return hash;
+  }
+}

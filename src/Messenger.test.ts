@@ -1,4 +1,3 @@
-import { mapToTree } from 'experimental-zkapp-offchain-storage/build/src/offChainStorage';
 import { Messenger, Message } from './Messenger';
 import {
   Field,
@@ -10,7 +9,6 @@ import {
   Bool,
   Provable,
 } from 'o1js';
-import { sender } from 'o1js/dist/node/lib/mina';
 
 let proofsEnabled = false;
 
@@ -101,6 +99,8 @@ describe('Messenger', () => {
     const messages = [
       // Rules:
       Field(0), // true, true, true
+      // Field(0), // true, true, true
+      // Field(1), // true, true, true
       // Field(15), // false, true, true
       // Field(31), // false, true, false
       // Field(11), // false, false, true
@@ -108,11 +108,29 @@ describe('Messenger', () => {
     ];
 
     const hash = Message.hashPubKey(senderAccount);
-    const txn = await Mina.transaction(senderAccount, () => {
-      zkApp.addMessage(messages[0], addressesMap.getWitness(hash));
-    });
-    await txn.prove();
-    // await txn.sign([senderKey]).send();
-    messagesMap.set(hash, messages[0]);
+
+    for (let i = 0; i < 3; i++) {
+      Provable.log(
+        'Local Nullifier Root: ',
+        nullifiersMap.getRoot(),
+        '\nOn-chain Nullifier Root',
+        zkApp.nullifiersHashMapRoot.get()
+      );
+      const txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addMessage(
+          messages[i],
+          addressesMap.getWitness(hash),
+          messagesMap.getWitness(hash),
+          nullifiersMap.getWitness(hash)
+        );
+      });
+
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+
+      messagesMap.set(hash, messages[i]);
+      nullifiersMap.set(hash, Bool(true).toField());
+      Provable.log(messagesMap.get(hash));
+    }
   });
 });

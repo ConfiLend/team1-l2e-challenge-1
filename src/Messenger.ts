@@ -44,13 +44,12 @@ export class Messenger extends SmartContract {
   }
 
   incrementAddressCount() {
-    const currentCount = this.addressCount.getAndRequireEquals();
-    // Provable.log('Current Count is', currentCount);
-    const newCount = Provable.if(
-      currentCount.lessThan(3), // TODO update to 100 for
-      currentCount.add(1),
-      currentCount
-    );
+    const addressCount = this.addressCount.getAndRequireEquals();
+
+    const newCount = addressCount.add(1);
+
+    newCount.assertLessThan(3); //  TODO update for 100
+
     // Provable.log('New Count is', newCount);
     this.addressCount.set(newCount);
   }
@@ -63,8 +62,7 @@ export class Messenger extends SmartContract {
   // we need to make sure that this is done only by the admin
   @method addAddress(keyWitness: MerkleMapWitness) {
     //check read op
-    const initialRoot = this.addressesHashMapRoot.get();
-    this.addressesHashMapRoot.requireEquals(initialRoot);
+    const initialRoot = this.addressesHashMapRoot.getAndRequireEquals();
 
     // check the initial state matches what we expect
     const [rootBefore, key] = keyWitness.computeRootAndKey(Field.empty());

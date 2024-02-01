@@ -1,7 +1,6 @@
 import {
   Bool,
   Field,
-  MerkleMap,
   SmartContract,
   state,
   State,
@@ -11,7 +10,6 @@ import {
   Provable,
   PublicKey,
   Poseidon,
-  assert,
 } from 'o1js';
 
 export class Messenger extends SmartContract {
@@ -19,6 +17,10 @@ export class Messenger extends SmartContract {
   @state(Field) addressesHashMapRoot = State<Field>();
   @state(Field) messagesHashMapRoot = State<Field>();
   @state(Field) nullifiersHashMapRoot = State<Field>();
+
+  events = {
+    'New message added:': Field,
+  };
 
   // TODO setup configs
   deploy() {
@@ -51,23 +53,16 @@ export class Messenger extends SmartContract {
     this.addressCount.set(newCount);
   }
 
-  @method addMessage(msg: Field, keyWitness: MerkleMapWitness) {
-    const message = new Message(msg);
-    this.assertMessageAddition(message, keyWitness);
-    this.addMessageToHashMap(msg);
-    // TODO emit event
-  }
-
   // TODO we need to make sure that this is done only by the admin
   @method addAddress(keyWitness: MerkleMapWitness) {
     const initialRoot = this.addressesHashMapRoot.getAndRequireEquals();
 
     // check the initial state matches what we expect
-    const [rootBefore, key] = keyWitness.computeRootAndKey(Field.empty());
-    rootBefore.assertEquals(initialRoot);
+    const [beforeRoot, key] = keyWitness.computeRootAndKey(Field.empty());
+    beforeRoot.assertEquals(initialRoot);
 
     // if everythign is alright make sure that we are not >100 ppl
-    this.incrementAddressCount(); // we should assert this
+    this.incrementAddressCount();
 
     // compute the root after new value
     const [rootAfter, _] = keyWitness.computeRootAndKey(Bool(true).toField());
@@ -76,30 +71,94 @@ export class Messenger extends SmartContract {
     this.addressesHashMapRoot.set(rootAfter);
   }
 
-  // TODO
-  addMessageToHashMap(msg: Field) {
-    return msg;
+  @method addMessage(
+    msg: Field,
+    keyWitnessAddresses: MerkleMapWitness,
+    keyWitnessMessages: MerkleMapWitness,
+    keyWitnessNullifiers: MerkleMapWitness
+  ) {
+    const message = new Message(msg);
+    this.assertMessageAddition(
+      message,
+      keyWitnessAddresses,
+      keyWitnessNullifiers
+    );
+    this.addMessageToHashMap(msg, keyWitnessMessages);
+    this.nullifyAddress(keyWitnessNullifiers);
+    this.emitEvent('New message added:', msg);
   }
 
-  /* make sure that the sender has permission and that
-   * the message is proeperly structured
+  addMessageToHashMap(msg: Field, keyWitness: MerkleMapWitness) {
+    const initialRoot = this.messagesHashMapRoot.getAndRequireEquals();
+    const [beforeRoot, key] = keyWitness.computeRootAndKey(Field(0));
+
+    // check to see that everything is as expected
+    initialRoot.assertEquals(
+      beforeRoot,
+      'Seems like the message is already in the map'
+    );
+    const hash = Message.hashPubKey(this.sender);
+    hash.assertEquals(key, 'Seems like the message is already in the map');
+
+    // calculate and set new root
+    const [newRoot, _] = keyWitness.computeRootAndKey(msg);
+    this.messagesHashMapRoot.set(newRoot);
+  }
+
+  nullifyAddress(keyWitness: MerkleMapWitness) {
+    const initialRoot = this.nullifiersHashMapRoot.getAndRequireEquals();
+    const [checkRoot, key] = keyWitness.computeRootAndKey(Field.empty());
+
+    // check to see that everything is as expected
+    checkRoot.assertEquals(initialRoot, 'The Key Witness is faulty');
+    const hash = Message.hashPubKey(this.sender);
+    hash.assertEquals(key, 'The Key Witness is faulty');
+
+    // calculate and set new root
+    const [newRoot, _] = keyWitness.computeRootAndKey(Bool(true).toField());
+    this.nullifiersHashMapRoot.set(newRoot);
+  }
+
+  assertNullifiers(keyWitness: MerkleMapWitness) {
+    const initialRoot = this.nullifiersHashMapRoot.getAndRequireEquals();
+    const [checkRoot, key] = keyWitness.computeRootAndKey(Field.empty());
+
+    // check to see that everything is as expected
+    checkRoot.assertEquals(
+      initialRoot,
+      'This address has already sent its message'
+    );
+    const hash = Message.hashPubKey(this.sender);
+    hash.assertEquals(key, 'This address has already sent its message');
+  }
+
+  /* make sure that:
+   * the sender has permission
+   * the sender sends its first message
+   * the message is properly structured
    */
-  assertMessageAddition(message: Message, keyWitness: MerkleMapWitness) {
-    this.assertSender(keyWitness);
+  assertMessageAddition(
+    message: Message,
+    keyWitnessAddresses: MerkleMapWitness,
+    keyWitnessMessages: MerkleMapWitness
+  ) {
+    this.assertNullifiers(keyWitnessMessages);
+    this.assertSender(keyWitnessAddresses);
     message.assertRules();
   }
 
   // asert that the sender is in the hash map
   assertSender(keyWitness: MerkleMapWitness) {
-    const root = this.addressesHashMapRoot.getAndRequireEquals();
-    const [rootCheck, key] = keyWitness.computeRootAndKey(Bool(true).toField());
+    const initialRoot = this.addressesHashMapRoot.getAndRequireEquals();
+    const [checkRoot, key] = keyWitness.computeRootAndKey(Bool(true).toField());
 
     // assert that the keyWitness is right and thus also the value
-    rootCheck.assertEquals(root, 'The sender is not in the approved addresses');
+    checkRoot.assertEquals(
+      initialRoot,
+      'The sender is not in the approved addresses'
+    );
 
-    /* this check above is enough but just so we can be
-     * absolutely sure we assert that the keys are equal
-     */
+    // second check to see if the sender is in the approved addresses
     const hash = Message.hashPubKey(this.sender);
     hash.assertEquals(key, 'The sender is not in the approved addresses');
   }

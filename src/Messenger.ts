@@ -60,22 +60,17 @@ export class Messenger extends SmartContract {
 
   // we need to make sure that this is done only by the admin
   @method addAddress(keyWitness: MerkleMapWitness) {
-    //check read op
     const initialRoot = this.addressesHashMapRoot.getAndRequireEquals();
 
     // check the initial state matches what we expect
     const [rootBefore, key] = keyWitness.computeRootAndKey(Field.empty());
     rootBefore.assertEquals(initialRoot);
 
-    Provable.log('rootBefore: ', rootBefore, '\nKey to change: ', key);
-
     // if everythign is alright make sure that we are not >100 ppl
     this.incrementAddressCount(); // we should assert this
 
     // compute the root after new value
     const [rootAfter, _] = keyWitness.computeRootAndKey(Bool(true).toField());
-
-    Provable.log('rootAfter: ', rootAfter);
 
     // set the new root
     this.addressesHashMapRoot.set(rootAfter);

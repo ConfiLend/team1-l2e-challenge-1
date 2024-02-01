@@ -8,13 +8,10 @@ import {
   MerkleMap,
   Bool,
   Provable,
+  UInt32,
 } from 'o1js';
 
 let proofsEnabled = false;
-
-const addressesMap = new MerkleMap();
-const messagesMap = new MerkleMap();
-const nullifiersMap = new MerkleMap();
 
 describe('Messenger', () => {
   let deployerAccount: PublicKey,
@@ -25,23 +22,29 @@ describe('Messenger', () => {
     zkAppPrivateKey: PrivateKey,
     zkApp: Messenger;
 
+  const addressesMap = new MerkleMap();
+  const messagesMap = new MerkleMap();
+  const nullifiersMap = new MerkleMap();
+  const Local = Mina.LocalBlockchain({ proofsEnabled });
+
   beforeAll(async () => {
     if (proofsEnabled) await Messenger.compile();
-  });
-
-  beforeEach(() => {
-    const Local = Mina.LocalBlockchain({ proofsEnabled });
     Mina.setActiveInstance(Local);
     ({ privateKey: deployerKey, publicKey: deployerAccount } =
       Local.testAccounts[0]);
     ({ privateKey: senderKey, publicKey: senderAccount } =
-      Local.testAccounts[1]);
+      Local.testAccounts[0]);
     zkAppPrivateKey = PrivateKey.random();
     zkAppAddress = zkAppPrivateKey.toPublicKey();
     zkApp = new Messenger(zkAppAddress);
   });
 
+  // beforeEach(() => {console.log()});
+
   async function localDeploy() {
+    zkAppPrivateKey = PrivateKey.random();
+    zkAppAddress = zkAppPrivateKey.toPublicKey();
+    zkApp = new Messenger(zkAppAddress);
     const txn = await Mina.transaction(deployerAccount, () => {
       AccountUpdate.fundNewAccount(deployerAccount);
       zkApp.deploy();
@@ -56,24 +59,210 @@ describe('Messenger', () => {
     await txn.sign([deployerKey, zkAppPrivateKey]).send();
   }
 
-  it.skip('Generates and deploys the `Messenger` smart contract', async () => {
+  it('Generates and deploys the `Messenger` smart contract', async () => {
     await localDeploy();
     const addressCount = zkApp.addressCount.get();
     expect(addressCount).toEqual(Field(0));
   });
 
-  it('Correctly updates the address count state on the `Messenger` smart contract', async () => {
-    await localDeploy();
+  it('Only admin can call add address', async () => {
+    //get the witness of the new key
+    try {
+      let hash = Message.hashPubKey(Local.testAccounts[0].publicKey);
+      const witness = addressesMap.getWitness(hash);
 
-    // 3 addAddress transactions
+      //create and send the transction
+      const txn = await Mina.transaction(
+        Local.testAccounts[1].publicKey,
+        () => {
+          zkApp.addAddress(witness);
+        }
+      );
+
+      // update the local map
+      addressesMap.set(hash, Bool(true).toField());
+
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+    } catch (error) {
+      expect(String(error)).toMatch(
+        /.*You have to be admin to call this function.*/
+      );
+    }
+  });
+
+  it('Correctly updates the address count', async () => {
     for (let i = 0; i < 3; i++) {
-      //create new transaction
-
       //get the witness of the new key
-      let hash = Message.hashPubKey(PrivateKey.random().toPublicKey());
-      if (i == 2) {
-        hash = Message.hashPubKey(senderAccount);
-      }
+      let hash = Message.hashPubKey(Local.testAccounts[i].publicKey);
+      const witness = addressesMap.getWitness(hash);
+
+      //create and send the transction
+      const txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addAddress(witness);
+      });
+
+      // update the local map
+      // Provable.log('Added PublicKey: ', hash);
+      addressesMap.set(hash, Bool(true).toField());
+
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+    }
+
+    const newCount = zkApp.addressCount.get();
+    expect(newCount).toEqual(Field(3));
+  });
+
+  it('Add message unsuccessfully Rule1', async () => {
+    try {
+      const hash = Message.hashPubKey(senderAccount);
+      let txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addMessage(
+          Field(3),
+          addressesMap.getWitness(hash),
+          messagesMap.getWitness(hash),
+          nullifiersMap.getWitness(hash)
+        );
+      });
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+      messagesMap.set(hash, Field(15));
+      nullifiersMap.set(hash, Bool(true).toField());
+    } catch (error) {
+      expect(String(error)).toMatch(/.*Rule 1.*/);
+    }
+  });
+
+  it('Add message unsuccessfully Rule2', async () => {
+    try {
+      const hash = Message.hashPubKey(senderAccount);
+      let txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addMessage(
+          Field(2),
+          addressesMap.getWitness(hash),
+          messagesMap.getWitness(hash),
+          nullifiersMap.getWitness(hash)
+        );
+      });
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+      messagesMap.set(hash, Field(14));
+      nullifiersMap.set(hash, Bool(true).toField());
+    } catch (error) {
+      expect(String(error)).toMatch(/.*Rule 2.*/);
+    }
+  });
+
+  it('Add message unsuccessfully Rule3', async () => {
+    try {
+      const hash = Message.hashPubKey(senderAccount);
+      let txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addMessage(
+          Field(40),
+          addressesMap.getWitness(hash),
+          messagesMap.getWitness(hash),
+          nullifiersMap.getWitness(hash)
+        );
+      });
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+      messagesMap.set(hash, Field(43));
+      nullifiersMap.set(hash, Bool(true).toField());
+    } catch (error) {
+      expect(String(error)).toMatch(/.*Rule 3.*/);
+    }
+  });
+
+  it('Add message successfully with event', async () => {
+    const hash = Message.hashPubKey(senderAccount);
+
+    let txn = await Mina.transaction(senderAccount, () => {
+      zkApp.addMessage(
+        Field(1),
+        addressesMap.getWitness(hash),
+        messagesMap.getWitness(hash),
+        nullifiersMap.getWitness(hash)
+      );
+    });
+    await txn.prove();
+    await txn.sign([senderKey]).send();
+    messagesMap.set(hash, Field(1));
+    nullifiersMap.set(hash, Bool(true).toField());
+
+    const events = await zkApp.fetchEvents(UInt32.from(0));
+    expect(events[0].event.data).toEqual(Field(1));
+    expect(events[0].type).toMatch(/New message added:/);
+  });
+
+  it('Sender second message', async () => {
+    const hash = Message.hashPubKey(senderAccount);
+    try {
+      const txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addMessage(
+          Field(1),
+          addressesMap.getWitness(hash),
+          messagesMap.getWitness(hash),
+          nullifiersMap.getWitness(hash)
+        );
+      });
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+    } catch (error) {
+      expect(String(error)).toMatch(
+        / .*This address has already sent its message.*/
+      );
+    }
+  });
+
+  it('Sender not approved', async () => {
+    const senderAccount = Local.testAccounts[4].publicKey;
+    const hash = Message.hashPubKey(senderAccount);
+    try {
+      const txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addMessage(
+          Field(1),
+          addressesMap.getWitness(hash),
+          messagesMap.getWitness(hash),
+          nullifiersMap.getWitness(hash)
+        );
+      });
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+    } catch (error) {
+      expect(String(error)).toMatch(
+        / .*The sender is not in the approved addresses.*/
+      );
+    }
+  });
+
+  it('Correctly adds 100 accounts', async () => {
+    for (let i = 0; i < 97; i++) {
+      const pubKey = PrivateKey.random().toPublicKey();
+      //get the witness of the new key
+      let hash = Message.hashPubKey(pubKey);
+      const witness = addressesMap.getWitness(hash);
+
+      //create and send the transction
+      const txn = await Mina.transaction(senderAccount, () => {
+        zkApp.addAddress(witness);
+      });
+
+      // update the local map
+      addressesMap.set(hash, Bool(true).toField());
+
+      await txn.prove();
+      await txn.sign([senderKey]).send();
+    }
+
+    const newCount = zkApp.addressCount.get();
+    expect(newCount).toEqual(Field(100));
+    expect(zkApp.addressesHashMapRoot.get()).toEqual(addressesMap.getRoot());
+  });
+
+  it('Add address over the limit', async () => {
+    try {
+      let hash = Message.hashPubKey(Local.testAccounts[4].publicKey);
       const witness = addressesMap.getWitness(hash);
 
       //create and send the transction
@@ -87,50 +276,8 @@ describe('Messenger', () => {
 
       await txn.prove();
       await txn.sign([senderKey]).send();
-    }
-
-    const newCount = zkApp.addressCount.get();
-    expect(newCount).toEqual(Field(3));
-  });
-
-  it('Assertions Rules', async () => {
-    await localDeploy();
-
-    const messages = [
-      // Rules:
-      Field(0), // true, true, true
-      // Field(0), // true, true, true
-      // Field(1), // true, true, true
-      // Field(15), // false, true, true
-      // Field(31), // false, true, false
-      // Field(11), // false, false, true
-      // Field(43), // false, false, false
-    ];
-
-    const hash = Message.hashPubKey(senderAccount);
-
-    for (let i = 0; i < 3; i++) {
-      Provable.log(
-        'Local Nullifier Root: ',
-        nullifiersMap.getRoot(),
-        '\nOn-chain Nullifier Root',
-        zkApp.nullifiersHashMapRoot.get()
-      );
-      const txn = await Mina.transaction(senderAccount, () => {
-        zkApp.addMessage(
-          messages[i],
-          addressesMap.getWitness(hash),
-          messagesMap.getWitness(hash),
-          nullifiersMap.getWitness(hash)
-        );
-      });
-
-      await txn.prove();
-      await txn.sign([senderKey]).send();
-
-      messagesMap.set(hash, messages[i]);
-      nullifiersMap.set(hash, Bool(true).toField());
-      Provable.log(messagesMap.get(hash));
+    } catch (error) {
+      expect(String(error)).toMatch(/.*No more addresses are allowed.*/);
     }
   });
 });

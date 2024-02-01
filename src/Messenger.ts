@@ -17,12 +17,12 @@ export class Messenger extends SmartContract {
   @state(Field) addressesHashMapRoot = State<Field>();
   @state(Field) messagesHashMapRoot = State<Field>();
   @state(Field) nullifiersHashMapRoot = State<Field>();
+  @state(PublicKey) admin = State<PublicKey>(); // should not be done like this
 
   events = {
     'New message added:': Field,
   };
 
-  // TODO setup configs
   deploy() {
     super.deploy();
     this.account.permissions.set({
@@ -41,6 +41,7 @@ export class Messenger extends SmartContract {
     this.addressesHashMapRoot.set(addressesHashMapRoot);
     this.messagesHashMapRoot.set(messagesHashMapRoot);
     this.nullifiersHashMapRoot.set(nullifiersHashMapRoot);
+    this.admin.set(this.sender);
   }
 
   incrementAddressCount() {
@@ -48,18 +49,28 @@ export class Messenger extends SmartContract {
 
     const newCount = addressCount.add(1);
 
-    newCount.assertLessThanOrEqual(3); //  TODO update for 100
+    newCount.assertLessThanOrEqual(100, 'No more addresses are allowed');
 
     this.addressCount.set(newCount);
   }
 
-  // TODO we need to make sure that this is done only by the admin
   @method addAddress(keyWitness: MerkleMapWitness) {
+    const admin = this.admin.getAndRequireEquals();
+    const hashAdmin = Message.hashPubKey(admin);
+
+    hashAdmin.assertEquals(
+      Message.hashPubKey(this.sender),
+      'You have to be admin to call this function'
+    );
+
     const initialRoot = this.addressesHashMapRoot.getAndRequireEquals();
 
     // check the initial state matches what we expect
     const [beforeRoot, key] = keyWitness.computeRootAndKey(Field.empty());
-    beforeRoot.assertEquals(initialRoot);
+    beforeRoot.assertEquals(
+      initialRoot,
+      'Seems like the address is already added'
+    );
 
     // if everythign is alright make sure that we are not >100 ppl
     this.incrementAddressCount();
@@ -189,7 +200,7 @@ export class Message {
     this.assertRule1(bits);
     this.assertRule2(bits);
     this.assertRule3(bits);
-    Provable.log(
+    /*Provable.log(
       this.msg,
       ' = ',
       bits[0],
@@ -203,7 +214,7 @@ export class Message {
       bits[4],
       ' ',
       bits[5]
-    );
+    ); */
   }
 
   //If flag 1 is true, then all other flags must be false

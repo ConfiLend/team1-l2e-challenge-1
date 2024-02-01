@@ -11,6 +11,7 @@ import {
   Provable,
   PublicKey,
   Poseidon,
+  assert,
 } from 'o1js';
 
 export class Messenger extends SmartContract {
@@ -45,17 +46,19 @@ export class Messenger extends SmartContract {
 
     const newCount = addressCount.add(1);
 
-    newCount.assertLessThan(3); //  TODO update for 100
+    newCount.assertLessThanOrEqual(3); //  TODO update for 100
 
-    this.addressCount.set(addressCount);
+    this.addressCount.set(newCount);
   }
 
-  @method addMessage(message: Field) {
-    const msg = new Message(message);
-    msg.assertRules();
+  @method addMessage(msg: Field, keyWitness: MerkleMapWitness) {
+    const message = new Message(msg);
+    this.assertMessageAddition(message, keyWitness);
+    this.addMessageToHashMap(msg);
+    // TODO emit event
   }
 
-  // we need to make sure that this is done only by the admin
+  // TODO we need to make sure that this is done only by the admin
   @method addAddress(keyWitness: MerkleMapWitness) {
     const initialRoot = this.addressesHashMapRoot.getAndRequireEquals();
 
@@ -72,20 +75,52 @@ export class Messenger extends SmartContract {
     // set the new root
     this.addressesHashMapRoot.set(rootAfter);
   }
+
+  // TODO
+  addMessageToHashMap(msg: Field) {
+    return msg;
+  }
+
+  /* make sure that the sender has permission and that
+   * the message is proeperly structured
+   */
+  assertMessageAddition(message: Message, keyWitness: MerkleMapWitness) {
+    this.assertSender(keyWitness);
+    message.assertRules();
+  }
+
+  // asert that the sender is in the hash map
+  assertSender(keyWitness: MerkleMapWitness) {
+    const root = this.addressesHashMapRoot.getAndRequireEquals();
+    const [rootCheck, key] = keyWitness.computeRootAndKey(Bool(true).toField());
+
+    // assert that the keyWitness is right and thus also the value
+    rootCheck.assertEquals(root, 'The sender is not in the approved addresses');
+
+    /* this check above is enough but just so we can be
+     * absolutely sure we assert that the keys are equal
+     */
+    const hash = Message.hashPubKey(this.sender);
+    hash.assertEquals(key, 'The sender is not in the approved addresses');
+  }
 }
 
 // class which allows us to abstract the msg checks
 export class Message {
-  private publicKey: PublicKey;
+  publicKey: PublicKey;
   private msg: Field;
 
   constructor(fieldValue: Field) {
     this.msg = fieldValue;
   }
 
-  hashPubKey(): Field {
-    this.publicKey.isEmpty().assertFalse("The Pair is empty we can't hash it");
-    const fields = this.publicKey.toFields();
+  setPublicKey(publicKey: PublicKey) {
+    this.publicKey = publicKey;
+  }
+
+  static hashPubKey(publicKey: PublicKey): Field {
+    publicKey.isEmpty().assertFalse("The Pair is empty we can't hash it");
+    const fields = publicKey.toFields();
     const hash = Poseidon.hash(fields);
     return hash;
   }
@@ -154,9 +189,5 @@ export class Message {
   // If first=true then second=false
   assertIfFirstNotSecond(first: Bool, second: Bool, msg: string) {
     first.not().or(second.not()).assertTrue(msg);
-  }
-
-  getMessageValue(): Field {
-    return this.msg;
   }
 }

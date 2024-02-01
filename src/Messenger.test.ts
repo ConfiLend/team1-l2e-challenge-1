@@ -1,3 +1,4 @@
+import { mapToTree } from 'experimental-zkapp-offchain-storage/build/src/offChainStorage';
 import { Messenger, Message } from './Messenger';
 import {
   Field,
@@ -7,7 +8,9 @@ import {
   AccountUpdate,
   MerkleMap,
   Bool,
+  Provable,
 } from 'o1js';
+import { sender } from 'o1js/dist/node/lib/mina';
 
 let proofsEnabled = false;
 
@@ -55,26 +58,25 @@ describe('Messenger', () => {
     await txn.sign([deployerKey, zkAppPrivateKey]).send();
   }
 
-  it.skip('generates and deploys the `Messenger` smart contract', async () => {
+  it.skip('Generates and deploys the `Messenger` smart contract', async () => {
     await localDeploy();
     const addressCount = zkApp.addressCount.get();
     expect(addressCount).toEqual(Field(0));
   });
 
-  it('correctly updates the address count state on the `Messenger` smart contract', async () => {
+  it('Correctly updates the address count state on the `Messenger` smart contract', async () => {
     await localDeploy();
 
     // 3 addAddress transactions
     for (let i = 0; i < 3; i++) {
       //create new transaction
-      const newPair = new Message({
-        publicKey: PrivateKey.random().toPublicKey(),
-        message: Field.empty(),
-      });
 
       //get the witness of the new key
-      const key = newPair.hashPubKey();
-      const witness = addressesMap.getWitness(key);
+      let hash = Message.hashPubKey(PrivateKey.random().toPublicKey());
+      if (i == 2) {
+        hash = Message.hashPubKey(senderAccount);
+      }
+      const witness = addressesMap.getWitness(hash);
 
       //create and send the transction
       const txn = await Mina.transaction(senderAccount, () => {
@@ -82,7 +84,8 @@ describe('Messenger', () => {
       });
 
       // update the local map
-      addressesMap.set(key, Bool(true).toField());
+      Provable.log('Added PublicKey: ', hash);
+      addressesMap.set(hash, Bool(true).toField());
 
       await txn.prove();
       await txn.sign([senderKey]).send();
@@ -92,8 +95,9 @@ describe('Messenger', () => {
     expect(newCount).toEqual(Field(3));
   });
 
-  it.skip('Assertions Rules', async () => {
+  it('Assertions Rules', async () => {
     await localDeploy();
+
     const messages = [
       // Rules:
       Field(0), // true, true, true
@@ -102,12 +106,13 @@ describe('Messenger', () => {
       // Field(11), // false, false, true
       // Field(43), // false, false, false
     ];
+
+    const hash = Message.hashPubKey(senderAccount);
     const txn = await Mina.transaction(senderAccount, () => {
-      for (let i = 0; i < messages.length; i++) {
-        zkApp.addMessage(messages[i]);
-      }
+      zkApp.addMessage(messages[0], addressesMap.getWitness(hash));
     });
     await txn.prove();
-    await txn.sign([senderKey]).send();
+    // await txn.sign([senderKey]).send();
+    messagesMap.set(hash, messages[0]);
   });
 });

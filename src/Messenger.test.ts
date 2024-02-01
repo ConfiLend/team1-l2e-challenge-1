@@ -65,13 +65,11 @@ describe('Messenger', () => {
 
   it('correctly updates the address count state on the `Messenger` smart contract', async () => {
     await localDeploy();
-    // const currentCount = zkApp.addressCount.get();
-    // console.log('Current Count is: ', currentCount.toString());
 
     // 3 addAddress transactions
     for (let i = 0; i < 3; i++) {
       //create new transaction
-      const newPair = new Pair({
+      const newPair = new Message({
         publicKey: PrivateKey.random().toPublicKey(),
         message: Field.empty(),
       });
@@ -85,7 +83,7 @@ describe('Messenger', () => {
         zkApp.addAddress(witness);
       });
 
-      // update the local hash map
+      // update the local map
       addressesMap.set(key, Bool(true).toField());
 
       await txn.prove();
@@ -93,7 +91,6 @@ describe('Messenger', () => {
     }
 
     const newCount = zkApp.addressCount.get();
-    // console.log('New Count is: ', newCount.toString());
     expect(newCount).toEqual(Field(3));
   });
 
@@ -117,7 +114,7 @@ describe('Messenger', () => {
   });
 });
 
-class Pair extends Struct({
+class Message extends Struct({
   publicKey: PublicKey,
   message: Field,
 }) {

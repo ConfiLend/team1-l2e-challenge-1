@@ -50,8 +50,7 @@ export class Messenger extends SmartContract {
 
     newCount.assertLessThan(3); //  TODO update for 100
 
-    // Provable.log('New Count is', newCount);
-    this.addressCount.set(newCount);
+    this.addressCount.set(addressCount);
   }
 
   @method addMessage(message: Field) {
